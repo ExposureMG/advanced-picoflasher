@@ -37,15 +37,17 @@ For simple debug output from SMC firmware, it is enough to only wire up SMC_DBG_
 | GP4 (UART1_TX) | SMC_DBG_RXD   |
 | GP5 (UART1_RX) | SMC_DBG_TXD   |
 
-### ISD12xx Audible Feedback IC
+### ISD ChipCorder
 
-| Signal   | Pico | Trinity | Corona   |
-| -------- | ---- | ------- | -------- |
-| SPI_RDY  | GP11 | FT2V4   | J2C2-A10 |
-| SPI_MISO | GP12 | FT2R7   | J2C2-B11 |
-| SPI_SS_N | GP13 | FT2R6   | J2C2-A11 |
-| SPI_CLK  | GP14 | FT2T4   | J2C2-A8  |
-| SPI_MOSI | GP15 | FT2T5   | J2C2-B8  |
+Previous revisions of PicoFlasher had support for flashing the ISD ChipCorder used for Power On and Eject sounds on
+Xbox 360 S consoles.
+
+This is now possible purely in software, by running an application on the console itself, because the SPI interface for
+the ISD ChipCorder is connected to the console's southbridge.
+
+Please use:
+- Under the Xbox 360 System Software: https://github.com/Byrom90/SonusGUI
+- Under libxenon: https://github.com/buddyjojo/Xbox360-ISD
 
 ## Acknowledgements
 
