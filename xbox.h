@@ -17,6 +17,9 @@
 #ifndef __XBOX_H__
 #define __XBOX_H__
 
+#include <stdbool.h>
+#include <stdint.h>
+
 void xbox_init();
 
 extern bool xbox_smc_stopped;
@@ -24,11 +27,13 @@ extern bool xbox_smc_stopped;
 void xbox_start_smc();
 void xbox_stop_smc();
 
+uint32_t xbox_read_reg(uint8_t reg);
+void xbox_write_reg(uint8_t reg, uint32_t val);
+
 uint32_t xbox_get_flash_config();
 int xbox_nand_read_block(uint32_t lba, uint8_t *buffer, uint8_t *spare);
 int xbox_nand_erase_block(uint32_t lba);
 int xbox_nand_write_block(uint32_t lba, uint8_t *buffer, uint8_t *spare);
-
 
 int xbox_emmc_init();
 int xbox_emmc_read_cid(uint8_t * cid);

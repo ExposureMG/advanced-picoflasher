@@ -19,7 +19,6 @@ pico_sdk_init()
 add_executable(${PROJECT_NAME} 
     main.c
 	usb_descriptors.c
-	spiex.c
 	xbox.c
 )
 

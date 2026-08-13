@@ -14,70 +14,33 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include <stdlib.h>
-#include <string.h>
-
-#include "bsp/board.h"
-#include "hardware/vreg.h"
-#include "hardware/clocks.h"
-#include "pico/stdlib.h"
 #include "pico/bootrom.h"
-
+#include "pico/stdlib.h"
 #include "tusb.h"
+
 #include "xbox.h"
 #include "pins.h"
+#include "protocol.h"
 
 #define CDC_PICO_FLASHER 0
 #define CDC_KER_DBG 1
 #define CDC_SMC_DBG 2
-
-#define LED_PIN 25
 
 void led_blink(void)
 {
 	static uint32_t start_ms = 0;
 	static bool led_state = false;
 
-	uint32_t now = board_millis();
+	uint32_t now = to_ms_since_boot(get_absolute_time());
 
 	if (now - start_ms < 50)
 		return;
 
 	start_ms = now;
 
-	gpio_put(LED_PIN, led_state);
+	gpio_put(PICO_DEFAULT_LED_PIN, led_state);
 	led_state = 1 - led_state;
 }
-
-#define GET_VERSION 0x00
-#define GET_FLASH_CONFIG 0x01
-#define READ_FLASH 0x02
-#define WRITE_FLASH 0x03
-#define READ_FLASH_STREAM 0x04
-#define ERASE_FLASH 0x05
-
-#define SET_SMC_WORKAROUND 0x20
-#define STOP_SMC 0x21
-#define START_SMC 0x22
-
-#define EMMC_DETECT 0x50
-#define EMMC_INIT 0x51
-#define EMMC_GET_CID 0x52
-#define EMMC_GET_CSD 0x53
-#define EMMC_GET_EXT_CSD 0x54
-#define EMMC_READ 0x55
-#define EMMC_READ_STREAM 0x56
-#define EMMC_WRITE 0x57
-
-#define REBOOT_TO_BOOTLOADER 0xFE
-
-#pragma pack(push, 1)
-struct cmd
-{
-	uint8_t cmd;
-	uint32_t lba;
-};
-#pragma pack(pop)
 
 bool stream_emmc = false;
 bool do_stream = false;
@@ -156,12 +119,15 @@ static void pico_flasher_rx_cb(uint8_t cdc_id)
 		if (count != sizeof(cmd))
 			return;
 
-		if (cmd.cmd == GET_VERSION)
+		switch (cmd.cmd)
+		{
+		case GET_VERSION:
 		{
 			uint32_t ver = 4;
 			tud_cdc_n_write(cdc_id, &ver, 4);
+			break;
 		}
-		else if (cmd.cmd == GET_FLASH_CONFIG)
+		case GET_FLASH_CONFIG:
 		{
 			// Stop SMC before reading the flash config.
 			// Workaround for existing software not using the SMC control commands.
@@ -170,16 +136,18 @@ static void pico_flasher_rx_cb(uint8_t cdc_id)
 
 			uint32_t fc = xbox_get_flash_config();
 			tud_cdc_n_write(cdc_id, &fc, 4);
+			break;
 		}
-		else if (cmd.cmd == READ_FLASH)
+		case READ_FLASH:
 		{
 			uint8_t buffer[0x210];
 			uint32_t ret = xbox_nand_read_block(cmd.lba, buffer, &buffer[0x200]);
 			tud_cdc_n_write(cdc_id, &ret, 4);
 			if (ret == 0)
 				tud_cdc_n_write(cdc_id, buffer, sizeof(buffer));
+			break;
 		}
-		else if (cmd.cmd == WRITE_FLASH)
+		case WRITE_FLASH:
 		{
 			uint8_t buffer[0x210];
 			uint32_t count = tud_cdc_n_read(cdc_id, &buffer, sizeof(buffer));
@@ -187,80 +155,79 @@ static void pico_flasher_rx_cb(uint8_t cdc_id)
 				return;
 			uint32_t ret = xbox_nand_write_block(cmd.lba, buffer, &buffer[0x200]);
 			tud_cdc_n_write(cdc_id, &ret, 4);
+			break;
 		}
-		else if (cmd.cmd == ERASE_FLASH)
+		case ERASE_FLASH:
 		{
 			uint32_t ret = xbox_nand_erase_block(cmd.lba);
 			tud_cdc_n_write(cdc_id, &ret, 4);
+			break;
 		}
-		else if (cmd.cmd == READ_FLASH_STREAM)
-		{
+		case READ_FLASH_STREAM:
 			stream_emmc = false;
 			do_stream = true;
 			stream_offset = 0;
 			stream_end = cmd.lba;
-		}
-		else if (cmd.cmd == SET_SMC_WORKAROUND)
-		{
+			break;
+		case SET_SMC_WORKAROUND:
 			enable_smc_workaround = cmd.lba & 1;
-		}
-		else if (cmd.cmd == STOP_SMC)
-		{
+			break;
+		case STOP_SMC:
 			xbox_stop_smc();
-		}
-		else if (cmd.cmd == START_SMC)
-		{
+			break;
+		case START_SMC:
 			xbox_start_smc();
-		}
-		else if (cmd.cmd == REBOOT_TO_BOOTLOADER)
-		{
-			reset_usb_boot(0, 0);
-		}
-		else if (cmd.cmd == EMMC_DETECT)
+			break;
+		case EMMC_DETECT:
 		{
 			uint32_t fc = xbox_get_flash_config();
 			int emmc_detect_result = (fc & 0xF0000000) == 0xC0000000;
 			tud_cdc_n_write(cdc_id, &emmc_detect_result, 1);
+			break;
 		}
-		else if (cmd.cmd == EMMC_INIT)
+		case EMMC_INIT:
 		{
 			uint32_t ret = xbox_emmc_init();
 			tud_cdc_n_write(cdc_id, &ret, 4);
+			break;
 		}
-		else if (cmd.cmd == EMMC_GET_CID)
+		case EMMC_GET_CID:
 		{
 			uint8_t cid_raw[16] = {0};
 			xbox_emmc_read_cid(cid_raw);
 			tud_cdc_n_write(cdc_id, cid_raw, sizeof(cid_raw));
+			break;
 		}
-		else if (cmd.cmd == EMMC_GET_CSD)
+		case EMMC_GET_CSD:
 		{
 			uint8_t csd_raw[16] = {0};
 			xbox_emmc_read_csd(csd_raw);
 			tud_cdc_n_write(cdc_id, csd_raw, sizeof(csd_raw));
+			break;
 		}
-		else if (cmd.cmd == EMMC_GET_EXT_CSD)
+		case EMMC_GET_EXT_CSD:
 		{
 			uint8_t ext_csd[512];
 			xbox_emmc_read_ext_csd(ext_csd);
 			tud_cdc_n_write(cdc_id, ext_csd, sizeof(ext_csd));
+			break;
 		}
-		else if (cmd.cmd == EMMC_READ)
+		case EMMC_READ:
 		{
 			uint8_t buffer[0x200];
 			int ret = xbox_emmc_read_block(cmd.lba, buffer);
 			tud_cdc_n_write(cdc_id, &ret, 4);
 			if (ret == 0)
 				tud_cdc_n_write(cdc_id, buffer, sizeof(buffer));
+			break;
 		}
-		else if (cmd.cmd == EMMC_READ_STREAM)
-		{
+		case EMMC_READ_STREAM:
 			stream_emmc = true;
 			do_stream = true;
 			stream_offset = 0;
 			stream_end = cmd.lba;
-		}
-		else if (cmd.cmd == EMMC_WRITE)
+			break;
+		case EMMC_WRITE:
 		{
 			uint8_t buffer[0x200];
 			uint32_t count = tud_cdc_n_read(cdc_id, &buffer, sizeof(buffer));
@@ -268,6 +235,11 @@ static void pico_flasher_rx_cb(uint8_t cdc_id)
 				return;
 			uint32_t ret = xbox_emmc_write_block(cmd.lba, buffer);
 			tud_cdc_n_write(cdc_id, &ret, 4);
+			break;
+		}
+		case REBOOT_TO_BOOTLOADER:
+			reset_usb_boot(0, 0);
+			break;
 		}
 
 		tud_cdc_n_write_flush(cdc_id);
@@ -358,8 +330,8 @@ void tud_cdc_line_coding_cb(uint8_t cdc_id, const cdc_line_coding_t *line_coding
 
 int main(void)
 {
-	gpio_init(LED_PIN);
-	gpio_set_dir(LED_PIN, GPIO_OUT);
+	gpio_init(PICO_DEFAULT_LED_PIN);
+	gpio_set_dir(PICO_DEFAULT_LED_PIN, GPIO_OUT);
 
 	tusb_init();
 	xbox_init();
