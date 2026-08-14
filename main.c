@@ -257,7 +257,7 @@ static void uart_bridge_init(uint8_t cdc_id, uart_inst_t *uart, int tx_pin, int 
 
 	// Set initial line coding from CDC
 	cdc_line_coding_t line_coding;
-	tud_cdc_get_line_coding(&line_coding);
+	tud_cdc_n_get_line_coding(cdc_id, &line_coding);
 	uart_bridge_line_coding_cb(cdc_id, &line_coding, uart);
 }
 
