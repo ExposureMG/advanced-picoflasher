@@ -109,6 +109,8 @@ static void pico_flasher_rx_cb(uint8_t cdc_id)
 		tud_cdc_n_peek(cdc_id, &cmd);
 		if (cmd == WRITE_FLASH)
 			needed_data += 0x210;
+		else if (cmd == EMMC_WRITE)
+			needed_data += 0x200;
 	}
 
 	if (avilable_data >= needed_data)
