@@ -36,6 +36,13 @@ target_link_libraries(${PROJECT_NAME}
 	hardware_spi
 )
 
+set(FLASHER_BOARD "pico" CACHE STRING "Select the board pinout to use")
+set_property(CACHE FLASHER_BOARD PROPERTY STRINGS "pico" "waveshare_rp2040_zero")
+
+if(FLASHER_BOARD STREQUAL "waveshare_rp2040_zero")
+    target_compile_definitions(${PROJECT_NAME} PRIVATE WAVESHARE_RP2040_ZERO=1)
+endif()
+
 # We are not using stdio
 pico_enable_stdio_usb(${PROJECT_NAME} 0)
 pico_enable_stdio_uart(${PROJECT_NAME} 0)

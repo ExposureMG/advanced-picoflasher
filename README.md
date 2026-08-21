@@ -8,22 +8,22 @@ Open source XBOX 360 NAND flasher firmware for Raspberry Pi Pico
 
 ### Nand Flash or eMMC
 
-| Pico  | Xbox           |
-| ----- | -------------- |
-| GP16  | SPI_MISO       |
-| GP17  | SPI_SS_N       |
-| GP18  | SPI_CLK        |
-| GP19  | SPI_MOSI       |
-| GP20  | SMC_DBG_EN     |
-| GP21  | SMC_RST_XDK_N  |
-| GND   | GND            |
+| Pico  | RP2040 Zero | Xbox           |
+| ----- | ----------- | -------------- |
+| GP16  | GP0         | SPI_MISO       |
+| GP17  | GP1         | SPI_SS_N       |
+| GP18  | GP2         | SPI_CLK        |
+| GP19  | GP3         | SPI_MOSI       |
+| GP20  | GP4         | SMC_DBG_EN     |
+| GP21  | GP5         | SMC_RST_XDK_N  |
+| GND   | GND         | GND            |
 
 ### Kernel Debug UART
 
-| Pico           | Xbox          |
-| ---------------| ------------- |
-| GP0 (UART0_TX) | KER_DBG_RXD   |
-| GP1 (UART0_RX) | KER_DBG_TXD   |
+| Pico           | RP2040 Zero     | Xbox          |
+| -------------- | --------------- | ------------- |
+| GP0 (UART0_TX) | GP12 (UART0_TX) | KER_DBG_RXD   |
+| GP1 (UART0_RX) | GP13 (UART0_RX) | KER_DBG_TXD   |
 
 ### SMC Debug UART
 
@@ -32,10 +32,10 @@ On most Retail PCBs only the TX pin is actually wired to to the debug headers, b
 some modifications.
 For simple debug output from SMC firmware, it is enough to only wire up SMC_DBG_TXD.
 
-| Pico           | Xbox          |
-| ---------------| ------------- |
-| GP4 (UART1_TX) | SMC_DBG_RXD   |
-| GP5 (UART1_RX) | SMC_DBG_TXD   |
+| Pico           | RP2040 Zero    | Xbox          |
+| -------------- | -------------- | ------------- |
+| GP4 (UART1_TX) | GP8 (UART1_TX) | SMC_DBG_RXD   |
+| GP5 (UART1_RX) | GP9 (UART1_RX) | SMC_DBG_TXD   |
 
 ### ISD ChipCorder
 
