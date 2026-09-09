@@ -1,17 +1,11 @@
 /*
  * Copyright (c) 2022 Balázs Triszka <balika011@gmail.com>
+ * Copyright (c) 2020-2025 Patrick Dussud
+ * Combined PicoFlasher & DirtyJTAG Firmware
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,
  * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include "pico/bootrom.h"
@@ -21,25 +15,21 @@
 #include "xbox.h"
 #include "pins.h"
 #include "protocol.h"
+#include "mode_manager.h"
+#include "pio_jtag.h"
+#include "cmd.h"
+#include "get_serial.h"
 
 #define CDC_PICO_FLASHER 0
-#define CDC_KER_DBG 1
-#define CDC_SMC_DBG 2
 
-void led_blink(void)
-{
-	static uint32_t start_ms = 0;
-	static bool led_state = false;
+extern pio_jtag_inst_t jtag_inst;
 
-	uint32_t now = to_ms_since_boot(get_absolute_time());
+static inline uint8_t get_ker_dbg_cdc(void) {
+	return (mode_manager_get_mode() == MODE_DIRTYJTAG) ? 0 : 1;
+}
 
-	if (now - start_ms < 50)
-		return;
-
-	start_ms = now;
-
-	gpio_put(PICO_DEFAULT_LED_PIN, led_state);
-	led_state = 1 - led_state;
+static inline uint8_t get_smc_dbg_cdc(void) {
+	return (mode_manager_get_mode() == MODE_DIRTYJTAG) ? 1 : 2;
 }
 
 bool stream_emmc = false;
@@ -99,8 +89,6 @@ static bool enable_smc_workaround = true;
 
 static void pico_flasher_rx_cb(uint8_t cdc_id)
 {
-	led_blink();
-
 	uint32_t avilable_data = tud_cdc_n_available(cdc_id);
 
 	uint32_t needed_data = sizeof(struct cmd);
@@ -131,8 +119,6 @@ static void pico_flasher_rx_cb(uint8_t cdc_id)
 		}
 		case GET_FLASH_CONFIG:
 		{
-			// Stop SMC before reading the flash config.
-			// Workaround for existing software not using the SMC control commands.
 			if (enable_smc_workaround)
 				xbox_stop_smc();
 
@@ -180,6 +166,21 @@ static void pico_flasher_rx_cb(uint8_t cdc_id)
 		case START_SMC:
 			xbox_start_smc();
 			break;
+		case CMD_SWITCH_TO_DIRTYJTAG:
+		{
+			uint32_t ack = 1;
+			tud_cdc_n_write(cdc_id, &ack, 4);
+			tud_cdc_n_write_flush(cdc_id);
+			sleep_ms(50);
+			mode_manager_set_mode(MODE_DIRTYJTAG);
+			return;
+		}
+		case CMD_GET_CURRENT_MODE:
+		{
+			uint32_t mode = (uint32_t)mode_manager_get_mode();
+			tud_cdc_n_write(cdc_id, &mode, 4);
+			break;
+		}
 		case EMMC_DETECT:
 		{
 			uint32_t fc = xbox_get_flash_config();
@@ -252,12 +253,10 @@ static void uart_bridge_line_coding_cb(uint8_t cdc_id, const cdc_line_coding_t *
 
 static void uart_bridge_init(uint8_t cdc_id, uart_inst_t *uart, int tx_pin, int rx_pin)
 {
-	// Init UART
 	uart_init(uart, 115200);
 	gpio_set_function(tx_pin, UART_FUNCSEL_NUM(uart, GPIO_FUNC_UART));
 	gpio_set_function(rx_pin, UART_FUNCSEL_NUM(uart, GPIO_FUNC_UART));
 
-	// Set initial line coding from CDC
 	cdc_line_coding_t line_coding;
 	tud_cdc_n_get_line_coding(cdc_id, &line_coding);
 	uart_bridge_line_coding_cb(cdc_id, &line_coding, uart);
@@ -265,6 +264,7 @@ static void uart_bridge_init(uint8_t cdc_id, uart_inst_t *uart, int tx_pin, int 
 
 static void uart_bridge_line_coding_cb(uint8_t cdc_id, const cdc_line_coding_t *line_coding, uart_inst_t *uart)
 {
+	(void)cdc_id;
 	static const uart_parity_t uart_parity_tusb_to_pico[] = {
 		UART_PARITY_NONE,	// 0: None
 		UART_PARITY_ODD,	// 1: Odd
@@ -279,7 +279,6 @@ static void uart_bridge_line_coding_cb(uint8_t cdc_id, const cdc_line_coding_t *
 		2,			// 2: 2 stop bits
 	};
 
-
 	uart_set_baudrate(uart, line_coding->bit_rate);
 	uart_set_format(uart,
 		line_coding->data_bits,
@@ -292,7 +291,7 @@ static void uart_bridge_task(uint8_t cdc_id, uart_inst_t *uart)
 	uint8_t tmp;
 	for (int maxr = 64; tud_cdc_n_available(cdc_id) && uart_is_writable(uart) && maxr; --maxr) {
 		tud_cdc_n_read(cdc_id, &tmp, 1);
-		uart_write_blocking(uart, &tmp,  1);
+		uart_write_blocking(uart, &tmp, 1);
 	}
 	for (int maxw = 64; uart_is_readable(uart) && tud_cdc_n_write_available(cdc_id) && maxw; --maxw) {
 		uart_read_blocking(uart, &tmp, 1);
@@ -301,44 +300,64 @@ static void uart_bridge_task(uint8_t cdc_id, uart_inst_t *uart)
 	tud_cdc_n_write_flush(cdc_id);
 }
 
+// DirtyJTAG vendor packet task
+static uint8_t djtag_rx_buf[64];
+static uint8_t djtag_tx_buf[64];
+
+static void djtag_task(void)
+{
+	if (tud_vendor_available()) {
+		uint32_t count = tud_vendor_read(djtag_rx_buf, sizeof(djtag_rx_buf));
+		if (count > 0) {
+			cmd_handle(&jtag_inst, djtag_rx_buf, count, djtag_tx_buf);
+		}
+	}
+}
+
 // Invoked when CDC interface received data from host
 void tud_cdc_rx_cb(uint8_t cdc_id)
 {
-	if (cdc_id == CDC_PICO_FLASHER)
+	if (mode_manager_get_mode() == MODE_PICOFLASHER && cdc_id == CDC_PICO_FLASHER) {
 		pico_flasher_rx_cb(cdc_id);
+	}
 }
 
 void tud_cdc_tx_complete_cb(uint8_t cdc_id)
 {
-	if (cdc_id == CDC_PICO_FLASHER)
-		led_blink();
+	(void)cdc_id;
 }
 
 void tud_cdc_line_coding_cb(uint8_t cdc_id, const cdc_line_coding_t *line_coding)
 {
-	// Start SMC on UART config change (e.g. setting speed of debug UART).
-	// Workaround for existing software not using the SMC control commands.
 	if (enable_smc_workaround && xbox_smc_stopped)
 		xbox_start_smc();
 
-	if (line_coding->bit_rate == 1200)
+	if (line_coding->bit_rate == 1200) {
 		rom_reset_usb_boot_extra(-1, 0, 0);
+	} else if (line_coding->bit_rate == 2400) {
+		mode_manager_toggle_mode();
+		return;
+	}
 
-	if (cdc_id == CDC_KER_DBG)
+	if (cdc_id == get_ker_dbg_cdc())
 		uart_bridge_line_coding_cb(cdc_id, line_coding, uart0);
-	else if (cdc_id == CDC_SMC_DBG)
+	else if (cdc_id == get_smc_dbg_cdc())
 		uart_bridge_line_coding_cb(cdc_id, line_coding, uart1);
 }
 
 int main(void)
 {
-	gpio_init(PICO_DEFAULT_LED_PIN);
-	gpio_set_dir(PICO_DEFAULT_LED_PIN, GPIO_OUT);
+#ifdef PIN_LED
+	gpio_init(PIN_LED);
+	gpio_set_dir(PIN_LED, GPIO_OUT);
+#endif
 
+	usb_serial_init();
 	tusb_init();
-	xbox_init();
-	uart_bridge_init(CDC_KER_DBG, uart0, UART0_TX, UART0_RX);
-	uart_bridge_init(CDC_SMC_DBG, uart1, UART1_TX, UART1_RX);
+	mode_manager_init();
+
+	uart_bridge_init(get_ker_dbg_cdc(), uart0, UART0_TX, UART0_RX);
+	uart_bridge_init(get_smc_dbg_cdc(), uart1, UART1_TX, UART1_RX);
 
 	gpio_init(I2C1_SDA);
 	gpio_init(I2C1_SCL);
@@ -346,9 +365,16 @@ int main(void)
 	while (1)
 	{
 		tud_task();
-		pico_flasher_stream(CDC_PICO_FLASHER);
-		uart_bridge_task(CDC_KER_DBG, uart0);
-		uart_bridge_task(CDC_SMC_DBG, uart1);
+		mode_manager_task();
+
+		if (mode_manager_get_mode() == MODE_PICOFLASHER) {
+			pico_flasher_stream(CDC_PICO_FLASHER);
+		} else {
+			djtag_task();
+		}
+
+		uart_bridge_task(get_ker_dbg_cdc(), uart0);
+		uart_bridge_task(get_smc_dbg_cdc(), uart1);
 	}
 
 	return 0;

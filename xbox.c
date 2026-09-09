@@ -43,6 +43,33 @@ void xbox_init()
 	gpio_set_dir(SMC_RST_XDK_N, GPIO_OUT);
 }
 
+void xbox_deinit()
+{
+	gpio_put(SMC_DBG_EN, 0);
+	gpio_put(SMC_RST_XDK_N, 1);
+	gpio_put(SPI_SS_N, 1);
+
+	spi_deinit(spi0);
+
+	gpio_init(SPI_MISO);
+	gpio_set_dir(SPI_MISO, GPIO_IN);
+	gpio_disable_pulls(SPI_MISO);
+
+	gpio_init(SPI_CLK);
+	gpio_set_dir(SPI_CLK, GPIO_IN);
+	gpio_disable_pulls(SPI_CLK);
+
+	gpio_init(SPI_MOSI);
+	gpio_set_dir(SPI_MOSI, GPIO_IN);
+	gpio_disable_pulls(SPI_MOSI);
+
+	gpio_init(SPI_SS_N);
+	gpio_set_dir(SPI_SS_N, GPIO_IN);
+	gpio_disable_pulls(SPI_SS_N);
+
+	xbox_smc_stopped = false;
+}
+
 bool xbox_smc_stopped = false;
 
 void xbox_start_smc()

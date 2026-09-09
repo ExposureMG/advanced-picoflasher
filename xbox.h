@@ -21,6 +21,7 @@
 #include <stdint.h>
 
 void xbox_init();
+void xbox_deinit();
 
 extern bool xbox_smc_stopped;
 
