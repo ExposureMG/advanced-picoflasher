@@ -40,9 +40,9 @@ tusb_desc_device_t const desc_device_dirtyjtag = {
     .bLength            = sizeof(tusb_desc_device_t),
     .bDescriptorType    = TUSB_DESC_DEVICE,
     .bcdUSB             = 0x0200,
-    .bDeviceClass       = 0x00,
-    .bDeviceSubClass    = 0x00,
-    .bDeviceProtocol    = 0x00,
+    .bDeviceClass       = TUSB_CLASS_MISC,
+    .bDeviceSubClass    = MISC_SUBCLASS_COMMON,
+    .bDeviceProtocol    = MISC_PROTOCOL_IAD,
     .bMaxPacketSize0    = CFG_TUD_ENDPOINT0_SIZE,
     .idVendor           = 0x1209,
     .idProduct          = 0xC0CA,
@@ -161,44 +161,12 @@ char const *string_desc_arr_dirtyjtag[] = {
     "SMC_DBG UART",             // 5: CDC 1
 };
 
-// Microsoft OS 1.0 Descriptors for automatic WinUSB binding
-#define VENDOR_REQUEST_CODE 0x01
-#define MS_OS_STRING_INDEX 0xEE
-
-static const uint8_t ms_os_string[] = {
-    0x12,                   // Length (18 bytes)
-    TUSB_DESC_STRING,       // Type (String)
-    'M', 0, 'S', 0, 'F', 0, 'T', 0, '1', 0, '0', 0, '0', 0, // "MSFT100"
-    VENDOR_REQUEST_CODE,    // Vendor Code
-    0x00                    // Padding
-};
-
-// Compatible ID Feature Descriptor (WinUSB for Interface 0)
-static const uint8_t ms_compat_id_desc[] = {
-    // Header
-    0x28, 0x00, 0x00, 0x00,                         // Length: 40 bytes
-    0x00, 0x01,                                     // Version: 1.0
-    0x04, 0x00,                                     // Compatibility Header Descriptor: 0x0004
-    0x01,                                           // Number of sections: 1
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,       // Reserved: 7 bytes
-    // Section 1 (Interface 0: WinUSB)
-    0x00,                                           // Interface number: 0
-    0x01,                                           // Reserved
-    'W', 'I', 'N', 'U', 'S', 'B', 0x00, 0x00,       // Compatible ID: "WINUSB\0\0"
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // Sub-compatible ID: unused
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00              // Reserved: 6 bytes
-};
-
 static uint16_t _desc_str[32];
 
 // Invoked when received GET STRING DESCRIPTOR request
 uint16_t const *tud_descriptor_string_cb(uint8_t index, uint16_t langid)
 {
     (void)langid;
-
-    if (index == MS_OS_STRING_INDEX) {
-        return (uint16_t const *)ms_os_string;
-    }
 
     bool is_dirtyjtag = (mode_manager_get_mode() == MODE_DIRTYJTAG);
     char const **arr = is_dirtyjtag ? string_desc_arr_dirtyjtag : string_desc_arr_picoflasher;
@@ -211,6 +179,8 @@ uint16_t const *tud_descriptor_string_cb(uint8_t index, uint16_t langid)
         memcpy(&_desc_str[1], arr[0], 2);
         chr_count = 1;
     } else {
+        // Windows sends GET_DESCRIPTOR for string 0xEE (MS OS 1.0).
+        // Returning NULL properly informs the host that no OS descriptor is present.
         if (!(index < arr_size)) return NULL;
 
         const char *str = arr[index];
@@ -226,16 +196,11 @@ uint16_t const *tud_descriptor_string_cb(uint8_t index, uint16_t langid)
     return _desc_str;
 }
 
-// Handle Vendor Class Setup Requests (MS OS 1.0 Compatible ID)
+// Vendor Class Setup Requests callback
 bool tud_vendor_control_xfer_cb(uint8_t rhport, uint8_t stage, tusb_control_request_t const *request)
 {
-    if (stage != CONTROL_STAGE_SETUP) return true;
-
-    if (request->bmRequestType_bit.type == TUSB_REQ_TYPE_VENDOR &&
-        request->bRequest == VENDOR_REQUEST_CODE &&
-        request->wIndex == 0x0004) {
-        return tud_control_xfer(rhport, request, (void*)ms_compat_id_desc, sizeof(ms_compat_id_desc));
-    }
-
-    return false;
+    (void)rhport;
+    (void)stage;
+    (void)request;
+    return true;
 }

@@ -67,30 +67,9 @@ void mode_manager_toggle_mode(void) {
 }
 
 void mode_manager_task(void) {
-    // 1. Check BOOTSEL button with debouncing
-    static uint32_t last_btn_check = 0;
-    static uint32_t btn_press_start = 0;
-    static bool btn_was_pressed = false;
-
     uint32_t now = to_ms_since_boot(get_absolute_time());
 
-    if (now - last_btn_check >= 20) {
-        last_btn_check = now;
-        bool pressed = get_bootsel_button();
-
-        if (pressed && !btn_was_pressed) {
-            btn_was_pressed = true;
-            btn_press_start = now;
-        } else if (!pressed && btn_was_pressed) {
-            // Button released: if pressed for at least 50ms, toggle mode
-            if (now - btn_press_start >= 50 && now - btn_press_start < 3000) {
-                mode_manager_toggle_mode();
-            }
-            btn_was_pressed = false;
-        }
-    }
-
-    // 2. Visual LED indication
+    // 1. Visual LED indication
     uint32_t phase = now % 1000;
 
 #ifdef PIN_LED
@@ -103,4 +82,29 @@ void mode_manager_task(void) {
         gpio_put(PIN_LED, led_on);
     }
 #endif
+
+    // 2. Check BOOTSEL button with debouncing
+    // Do not poll BOOTSEL during the first 3 seconds of boot to avoid disrupting USB enumeration
+    if (now < 3000) return;
+
+    static uint32_t last_btn_check = 0;
+    static uint32_t btn_press_start = 0;
+    static bool btn_was_pressed = false;
+
+    if (now - last_btn_check >= 100) {
+        last_btn_check = now;
+        // get_bootsel_button() returns 1 (high) when released, 0 (low) when pressed
+        bool pressed = !get_bootsel_button();
+
+        if (pressed && !btn_was_pressed) {
+            btn_was_pressed = true;
+            btn_press_start = now;
+        } else if (!pressed && btn_was_pressed) {
+            // Button released: if pressed for at least 150ms, toggle mode
+            if (now - btn_press_start >= 150 && now - btn_press_start < 5000) {
+                mode_manager_toggle_mode();
+            }
+            btn_was_pressed = false;
+        }
+    }
 }
